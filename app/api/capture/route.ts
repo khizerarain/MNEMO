@@ -68,7 +68,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const embedding = await generateEmbedding(trimmedContent);
+    // Generate the embedding, but do not let a Voyage rate-limit (or any other
+    // embedding failure) block saving the memory. We still want the user to keep
+    // their notes and quiz cards even if the vector search is temporarily unavailable.
+    let embedding: number[] | null = null;
+    let embeddingWarning: string | null = null;
+    try {
+      embedding = await generateEmbedding(trimmedContent);
+    } catch (embeddingError) {
+      console.error("Embedding failed, saving memory without vector:", embeddingError);
+      embeddingWarning = "We saved your memory, but the AI connection feature is temporarily unavailable because the embedding service is rate-limited.";
+    }
 
     const { data: memory, error: insertError } = await supabase
       .from("memories")
@@ -78,7 +88,7 @@ export async function POST(request: Request) {
         source_url: sourceUrl || null,
         title: extracted.title,
         ideas: extracted.ideas,
-        embedding: JSON.stringify(embedding),
+        embedding: embedding ? JSON.stringify(embedding) : null,
       })
       .select()
       .single();
@@ -105,9 +115,12 @@ export async function POST(request: Request) {
       }
     }
 
-    void findConnections(memory.id, user.id, embedding);
+    // Only search for semantic connections if the embedding was generated successfully.
+    if (embedding) {
+      void findConnections(memory.id, user.id, embedding);
+    }
 
-    return NextResponse.json({ success: true, memory });
+    return NextResponse.json({ success: true, memory, warning: embeddingWarning });
   } catch (error) {
     console.error("Capture error:", error);
     return NextResponse.json(

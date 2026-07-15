@@ -35,12 +35,14 @@ export default function CapturePage() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [savedMemory, setSavedMemory] = useState<Memory | null>(null);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError(null);
+    setWarning(null);
     setSavedMemory(null);
 
     try {
@@ -54,6 +56,9 @@ export default function CapturePage() {
       if (!response.ok) throw new Error(data.error || "Failed to save memory");
 
       setSavedMemory(data.memory);
+      if (data.warning) {
+        setWarning(data.warning);
+      }
       setContent("");
       setSourceUrl("");
     } catch (err) {
@@ -104,6 +109,12 @@ export default function CapturePage() {
               {error && (
                 <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">
                   {error}
+                </div>
+              )}
+
+              {warning && (
+                <div className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded-lg">
+                  {warning}
                 </div>
               )}
 
