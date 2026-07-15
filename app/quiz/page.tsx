@@ -7,10 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { GraduationCap, Plus } from "lucide-react";
 
+interface MemoryIdea {
+  insight: string;
+  question: string;
+  answer: string;
+}
+
 /**
  * Data shape expected by the QuizCard component.
  * Supabase stores question/answer/repetitions/easiness_factor directly,
- * so we map those columns into a friendlier client shape.
+ * so we map those columns into a friendlier client shape. We also fetch the
+ * parent memory's ideas so the component can build multiple-choice distractors.
  */
 interface QuizCardData {
   id: string;
@@ -19,6 +26,7 @@ interface QuizCardData {
   memory: {
     id: string;
     title: string;
+    ideas: MemoryIdea[];
   };
   repetitions: number;
   easiness_factor: number;
@@ -33,7 +41,7 @@ export default async function QuizPage() {
     redirect("/auth/login");
   }
 
-  // Fetch cards that are due today or earlier. We join with memories to get the title.
+  // Fetch cards that are due today or earlier. We join with memories to get the title and ideas.
   const { data, error } = await supabase
     .from("quiz_cards")
     .select(`
@@ -44,7 +52,7 @@ export default async function QuizPage() {
       easiness_factor,
       interval_days,
       next_review_at,
-      memory:memory_id ( id, title )
+      memory:memory_id ( id, title, ideas )
     `)
     .eq("user_id", user.id)
     .lte("next_review_at", new Date().toISOString())
@@ -63,7 +71,7 @@ export default async function QuizPage() {
     repetitions: number;
     easiness_factor: number;
     interval_days: number;
-    memory: { id: string; title: string };
+    memory: { id: string; title: string; ideas: MemoryIdea[] };
   }>;
 
   const cards: QuizCardData[] = rows.map((row) => ({
@@ -106,7 +114,7 @@ export default async function QuizPage() {
           <>
             <div className="mb-4 flex items-center justify-between text-sm text-mnemo-muted">
               <span>{cards.length} card{cards.length === 1 ? "" : "s"} due today</span>
-              <span>Card 1 of {cards.length}</span>
+              <span>Card {1} of {cards.length}</span>
             </div>
             <QuizCard cards={cards} />
           </>

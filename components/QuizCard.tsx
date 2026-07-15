@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { CheckCircle, XCircle, RotateCcw, Eye } from "lucide-react";
+import { CheckCircle, XCircle, RotateCcw } from "lucide-react";
+
+interface MemoryIdea {
+  insight: string;
+  question: string;
+  answer: string;
+}
 
 interface QuizCardData {
   id: string;
@@ -14,6 +20,7 @@ interface QuizCardData {
   memory: {
     id: string;
     title: string;
+    ideas: MemoryIdea[];
   };
 }
 
@@ -22,37 +29,78 @@ interface QuizCardProps {
 }
 
 /**
- * Map the four user-friendly difficulty buttons to SM-2 quality ratings.
- * SM-2 expects 0-5, where 0 = complete blackout and 5 = perfect recall.
+ * Build four multiple-choice options for a quiz card.
+ * The correct answer is always included, and distractors are pulled from the
+ * other ideas in the same memory. If the memory does not have enough other
+ * ideas, generic fallback options are used to pad the list to four.
  */
-const RATING_MAP: Record<string, number> = {
-  again: 0,
-  hard: 3,
-  good: 4,
-  easy: 5,
-};
+function generateOptions(card: QuizCardData): { options: string[]; correctIndex: number } {
+  const correctAnswer = card.answer.trim();
+
+  const otherAnswers = card.memory.ideas
+    .filter((idea) => idea.answer.trim() !== correctAnswer)
+    .map((idea) => idea.answer.trim())
+    .filter((value, index, self) => self.indexOf(value) === index);
+
+  const fallbackOptions = [
+    "None of the above",
+    "All of the above",
+    "It is not mentioned in the content",
+  ];
+
+  const distractors =
+    otherAnswers.length >= 3
+      ? otherAnswers.slice(0, 3)
+      : [...otherAnswers, ...fallbackOptions.slice(0, 3 - otherAnswers.length)];
+
+  const options = [correctAnswer, ...distractors];
+
+  // Shuffle with Fisher-Yates so the correct answer is not always first.
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+
+  const correctIndex = options.indexOf(correctAnswer);
+  return { options, correctIndex };
+}
 
 export function QuizCard({ cards }: QuizCardProps) {
   const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [showResult, setShowResult] = useState(false);
 
   const currentCard = cards[currentIndex];
-  const progress = ((currentIndex) / cards.length) * 100;
+  const progress = (currentIndex / cards.length) * 100;
 
-  /**
-   * Submit the user's self-assessment to the SM-2 API.
-   * The API expects a quality score (0-5), not the button label.
-   */
-  async function submitRating(ratingKey: keyof typeof RATING_MAP) {
+  const { options, correctIndex } = useMemo(
+    () => generateOptions(currentCard),
+    [currentCard]
+  );
+
+  // Reset selection state whenever the card changes.
+  useEffect(() => {
+    setSelectedIndex(null);
+    setShowResult(false);
+  }, [currentIndex]);
+
+  function handleSelect(index: number) {
+    if (showResult) return;
+    setSelectedIndex(index);
+    setShowResult(true);
+  }
+
+  async function handleNext() {
     if (!currentCard) return;
     setLoading(true);
     setError(null);
 
-    const quality = RATING_MAP[ratingKey];
+    const isCorrect = selectedIndex === correctIndex;
+    const quality = isCorrect ? 4 : 0;
 
     try {
       const response = await fetch("/api/quiz", {
@@ -66,7 +114,6 @@ export function QuizCard({ cards }: QuizCardProps) {
 
       if (currentIndex + 1 < cards.length) {
         setCurrentIndex((prev) => prev + 1);
-        setRevealed(false);
       } else {
         setCompleted(true);
       }
@@ -111,64 +158,72 @@ export function QuizCard({ cards }: QuizCardProps) {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {!revealed ? (
-            <Button
-              onClick={() => setRevealed(true)}
-              variant="outline"
-              className="w-full border-mnemo-border text-mnemo-text hover:bg-mnemo-background rounded-lg h-11"
-            >
-              <Eye className="w-4 h-4 mr-2" />
-              Show answer
-            </Button>
-          ) : (
-            <div className="p-4 rounded-lg bg-mnemo-background border border-mnemo-border">
-              <p className="text-sm font-medium text-mnemo-text mb-1">Answer:</p>
-              <p className="text-sm text-mnemo-muted">{currentCard.answer}</p>
-            </div>
-          )}
+          <div className="grid grid-cols-1 gap-2">
+            {options.map((option, index) => {
+              const isSelected = selectedIndex === index;
+              const isCorrect = index === correctIndex;
+              let buttonClass =
+                "border-mnemo-border text-mnemo-text hover:bg-mnemo-background rounded-lg h-auto py-3 justify-start text-left";
 
-          {revealed && (
-            <div className="space-y-2">
-              <p className="text-xs text-mnemo-muted text-center">How well did you know this?</p>
-              {error && (
-                <p className="text-xs text-red-600 text-center">{error}</p>
+              if (showResult) {
+                if (isCorrect) {
+                  buttonClass =
+                    "border-emerald-300 bg-emerald-50 text-emerald-800 rounded-lg h-auto py-3 justify-start text-left";
+                } else if (isSelected) {
+                  buttonClass =
+                    "border-red-300 bg-red-50 text-red-800 rounded-lg h-auto py-3 justify-start text-left";
+                } else {
+                  buttonClass =
+                    "border-mnemo-border text-mnemo-muted rounded-lg h-auto py-3 justify-start text-left";
+                }
+              } else if (isSelected) {
+                buttonClass =
+                  "border-mnemo-accent bg-mnemo-accent/5 text-mnemo-text rounded-lg h-auto py-3 justify-start text-left";
+              }
+
+              return (
+                <Button
+                  key={index}
+                  disabled={showResult || loading}
+                  onClick={() => handleSelect(index)}
+                  variant="outline"
+                  className={buttonClass}
+                >
+                  <span className="font-medium mr-3">{String.fromCharCode(65 + index)}.</span>
+                  <span className="text-sm leading-snug">{option}</span>
+                </Button>
+              );
+            })}
+          </div>
+
+          {showResult && (
+            <div className="space-y-3">
+              {selectedIndex === correctIndex ? (
+                <div className="flex items-center gap-2 text-emerald-700 text-sm">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">Correct!</span>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-red-700 text-sm">
+                    <XCircle className="w-5 h-5" />
+                    <span className="font-medium">Not quite</span>
+                  </div>
+                  <p className="text-sm text-mnemo-muted">
+                    The correct answer was: <span className="text-mnemo-text font-medium">{currentCard.answer}</span>
+                  </p>
+                </div>
               )}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <Button
-                  disabled={loading}
-                  onClick={() => submitRating("again")}
-                  variant="outline"
-                  className="border-red-200 text-red-700 hover:bg-red-50 rounded-lg h-11"
-                >
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Again
-                </Button>
-                <Button
-                  disabled={loading}
-                  onClick={() => submitRating("hard")}
-                  variant="outline"
-                  className="border-mnemo-border text-mnemo-muted hover:bg-mnemo-background rounded-lg h-11"
-                >
-                  Hard
-                </Button>
-                <Button
-                  disabled={loading}
-                  onClick={() => submitRating("good")}
-                  variant="outline"
-                  className="border-mnemo-border text-mnemo-text hover:bg-mnemo-background rounded-lg h-11"
-                >
-                  Good
-                </Button>
-                <Button
-                  disabled={loading}
-                  onClick={() => submitRating("easy")}
-                  variant="outline"
-                  className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-lg h-11"
-                >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Easy
-                </Button>
-              </div>
+
+              {error && <p className="text-xs text-red-600 text-center">{error}</p>}
+
+              <Button
+                onClick={handleNext}
+                disabled={loading}
+                className="w-full bg-mnemo-primary hover:bg-mnemo-primary/90 text-white rounded-lg h-11"
+              >
+                {loading ? "Saving..." : "Next question"}
+              </Button>
             </div>
           )}
         </CardContent>
