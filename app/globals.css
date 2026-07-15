@@ -144,6 +144,48 @@
   }
 }
 
+/* ===== App workspace (authenticated OS shell) — always premium dark ===== */
+.app-root {
+  --background: #050505;
+  --sidebar-bg: #0a0a0a;
+  --card: #111111;
+  --border: rgba(255, 255, 255, 0.08);
+  --foreground: #ffffff;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --accent: #06b6d4;
+  --muted-foreground: #a1a1aa;
+
+  background-color: #050505;
+  color: #ffffff;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.app-root ::selection {
+  background: rgba(124, 58, 237, 0.35);
+  color: #ffffff;
+}
+
+.app-root ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.app-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.app-root ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.app-root ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+  background-clip: content-box;
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-display);

@@ -1,56 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
-import { Navbar } from "@/components/Navbar";
-import { MemoryCard } from "@/components/MemoryCard";
-import { ConnectionCard } from "@/components/ConnectionCard";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardTitle,
-} from "@/components/ui/card";
-import { Plus, Network, GraduationCap, MessageSquare, Brain, Link2, Zap, BookOpen } from "lucide-react";
+import { AppShell } from "@/components/app/AppShell";
+import { DashboardView, type DashboardData } from "@/components/app/DashboardView";
+import { deriveTopic, calculateStreak } from "@/lib/knowledge";
 
-interface MemoryWithConnections {
-  id: string;
-  title: string;
-  raw_content: string;
-  source_url?: string | null;
-  ideas: Array<{ insight: string; question: string; answer: string }>;
-  created_at: string;
-  connection_count: number;
-  connections: Array<{
-    id: string;
-    explanation: string;
-    similarity_score: number;
-    other_memory: {
-      id: string;
-      title: string;
-    };
-  }>;
-}
+export const dynamic = "force-dynamic";
 
-function calculateStreak(dates: string[]): number {
-  if (dates.length === 0) return 0;
-  const uniqueDays = Array.from(
-    new Set(dates.map((date) => new Date(date).toDateString()))
-  ).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-  let streak = 0;
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
-  let expectedDay = today;
-  for (const day of uniqueDays) {
-    if (day === expectedDay || (streak === 0 && day === yesterday)) {
-      streak++;
-      expectedDay = new Date(new Date(expectedDay).getTime() - 86400000).toDateString();
-    } else if (streak > 0) {
-      break;
-    }
-  }
-  return streak;
-}
+type Idea = { insight: string; question: string; answer: string };
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -58,179 +14,176 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    redirect("/auth/login");
-  }
+  if (!user) redirect("/auth/login");
 
-  const [memoriesResult, connectionsResult, quizResult] = await Promise.all([
+  const [memoriesRes, connectionsRes, quizRes] = await Promise.all([
     supabase
       .from("memories")
-      .select("id, title, raw_content, source_url, ideas, created_at")
+      .select("id, title, ideas, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
       .from("connections")
-      .select("id, explanation, similarity_score, memory_a_id, memory_b_id, created_at")
+      .select("id, memory_a_id, memory_b_id, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
     supabase
       .from("quiz_cards")
-      .select("id")
-      .eq("user_id", user.id)
-      .lte("next_review_at", new Date().toISOString()),
+      .select("id, memory_id, repetitions, easiness_factor, next_review_at")
+      .eq("user_id", user.id),
   ]);
 
-  const memories = memoriesResult.data || [];
-  const connections = connectionsResult.data || [];
-  const dueCards = quizResult.data || [];
+  const memories = (memoriesRes.data || []) as {
+    id: string;
+    title: string;
+    ideas: Idea[];
+    created_at: string;
+  }[];
+  const connections = (connectionsRes.data || []) as {
+    id: string;
+    memory_a_id: string;
+    memory_b_id: string;
+    created_at: string;
+  }[];
+  const quizCards = (quizRes.data || []) as {
+    id: string;
+    memory_id: string;
+    repetitions: number;
+    easiness_factor: number;
+    next_review_at: string;
+  }[];
 
-  const countMap = new Map<string, number>();
-  for (const memory of memories) {
-    countMap.set(memory.id, 0);
+  const isToday = (iso: string) =>
+    new Date(iso).toDateString() === new Date().toDateString();
+  const now = Date.now();
+
+  const memoryById = new Map(memories.map((m) => [m.id, m]));
+  const titleById = (id: string) => memoryById.get(id)?.title || "a memory";
+
+  // connection counts per memory
+  const connCount = new Map<string, number>();
+  for (const c of connections) {
+    connCount.set(c.memory_a_id, (connCount.get(c.memory_a_id) || 0) + 1);
+    connCount.set(c.memory_b_id, (connCount.get(c.memory_b_id) || 0) + 1);
   }
-  for (const connection of connections) {
-    if (countMap.has(connection.memory_a_id)) {
-      countMap.set(connection.memory_a_id, (countMap.get(connection.memory_a_id) || 0) + 1);
-    }
-    if (countMap.has(connection.memory_b_id)) {
-      countMap.set(connection.memory_b_id, (countMap.get(connection.memory_b_id) || 0) + 1);
+
+  // heatmap
+  const heatmap: Record<string, number> = {};
+  for (const m of memories) {
+    const key = new Date(m.created_at).toISOString().slice(0, 10);
+    heatmap[key] = (heatmap[key] || 0) + 1;
+  }
+  for (const c of connections) {
+    const key = new Date(c.created_at).toISOString().slice(0, 10);
+    heatmap[key] = (heatmap[key] || 0) + 1;
+  }
+
+  // recent topics
+  const recentTopics = Array.from(
+    new Set(memories.slice(0, 6).map((m) => deriveTopic(m.title)))
+  ).slice(0, 4);
+
+  // suggestion: two recent memories, different topics, not already connected
+  const connectedPairs = new Set(
+    connections.flatMap((c) => [
+      `${c.memory_a_id}:${c.memory_b_id}`,
+      `${c.memory_b_id}:${c.memory_a_id}`,
+    ])
+  );
+  let suggestion: { a: string; b: string } | null = null;
+  const recent = memories.slice(0, 8);
+  outer: for (let i = 0; i < recent.length; i++) {
+    for (let j = i + 1; j < recent.length; j++) {
+      const a = recent[i];
+      const b = recent[j];
+      const topicA = deriveTopic(a.title);
+      const topicB = deriveTopic(b.title);
+      if (topicA !== topicB && !connectedPairs.has(`${a.id}:${b.id}`)) {
+        suggestion = { a: topicA, b: topicB };
+        break outer;
+      }
     }
   }
 
-  const memoriesWithConnections: MemoryWithConnections[] = memories.map((memory) => {
-    const memoryConnections = connections
-      .filter((c) => c.memory_a_id === memory.id || c.memory_b_id === memory.id)
-      .map((c) => ({
-        id: c.id,
-        explanation: c.explanation,
-        similarity_score: c.similarity_score,
-        other_memory: {
-          id: c.memory_a_id === memory.id ? c.memory_b_id : c.memory_a_id,
-          title: memories.find((m) => m.id === (c.memory_a_id === memory.id ? c.memory_b_id : c.memory_a_id))?.title || "Unknown",
-        },
-      }));
-    return { ...memory, connection_count: countMap.get(memory.id) || 0, connections: memoryConnections };
-  });
+  // activity feed
+  const feed = [
+    ...memories.slice(0, 8).map((m) => ({
+      type: "memory" as const,
+      title: `Added “${m.title}”`,
+      time: m.created_at,
+      id: m.id,
+    })),
+    ...connections.slice(0, 8).map((c) => ({
+      type: "connection" as const,
+      title: `Connected “${titleById(c.memory_a_id)}” ↔ “${titleById(c.memory_b_id)}”`,
+      time: c.created_at,
+      id: c.id,
+    })),
+  ]
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+    .slice(0, 6);
 
-  const recentConnections = connections.slice(0, 3).map((connection) => ({
-    ...connection,
-    memory_a: {
-      id: connection.memory_a_id,
-      title: memories.find((m) => m.id === connection.memory_a_id)?.title || "Unknown",
+  // insights from quiz easiness factor grouped by topic
+  const topicStats = new Map<string, { sumEf: number; n: number }>();
+  for (const card of quizCards) {
+    const mem = memoryById.get(card.memory_id);
+    if (!mem) continue;
+    const topic = deriveTopic(mem.title);
+    const cur = topicStats.get(topic) || { sumEf: 0, n: 0 };
+    cur.sumEf += card.easiness_factor || 2.5;
+    cur.n += 1;
+    topicStats.set(topic, cur);
+  }
+  const efToPct = (ef: number) =>
+    Math.max(35, Math.min(99, Math.round(35 + ((ef - 1.3) / (2.7 - 1.3)) * 64)));
+
+  let strongest: string | null = null;
+  let weakest: string | null = null;
+  let strongestPct = 0;
+  let weakestPct = 0;
+  const ranked = Array.from(topicStats.entries())
+    .map(([topic, s]) => ({ topic, avg: s.sumEf / s.n }))
+    .sort((a, b) => b.avg - a.avg);
+  if (ranked.length > 0) {
+    strongest = ranked[0].topic;
+    strongestPct = efToPct(ranked[0].avg);
+    weakest = ranked[ranked.length - 1].topic;
+    weakestPct = efToPct(ranked[ranked.length - 1].avg);
+    if (ranked.length === 1) weakest = null;
+  }
+
+  const data: DashboardData = {
+    stats: {
+      memoriesToday: memories.filter((m) => isToday(m.created_at)).length,
+      connectionsToday: connections.filter((c) => isToday(c.created_at)).length,
+      dueCards: quizCards.filter((c) => new Date(c.next_review_at).getTime() <= now)
+        .length,
+      totalMemories: memories.length,
+      totalConnections: connections.length,
+      streak: calculateStreak([
+        ...memories.map((m) => m.created_at),
+        ...connections.map((c) => c.created_at),
+      ]),
     },
-    memory_b: {
-      id: connection.memory_b_id,
-      title: memories.find((m) => m.id === connection.memory_b_id)?.title || "Unknown",
-    },
-  }));
-
-  const allActivityDates = [...memories.map((m) => m.created_at), ...connections.map((c) => c.created_at)];
-  const streak = calculateStreak(allActivityDates);
-  const totalConnections = connections.length;
-
-  const stats = [
-    { label: "Memories", value: memories.length, icon: BookOpen },
-    { label: "Connections", value: totalConnections, icon: Link2 },
-    { label: "Due today", value: dueCards.length, icon: GraduationCap },
-    { label: "Streak", value: streak, icon: Zap },
-  ];
+    recentTopics,
+    suggestion,
+    heatmap,
+    feed,
+    insights: { strongest, weakest, strongestPct, weakestPct },
+    recentMemories: memories.slice(0, 5).map((m) => ({
+      id: m.id,
+      title: m.title,
+      topic: deriveTopic(m.title),
+      created_at: m.created_at,
+      ideasCount: Array.isArray(m.ideas) ? m.ideas.length : 0,
+      connectionCount: connCount.get(m.id) || 0,
+    })),
+    firstName: (user.email?.split("@")[0] || "").replace(/[^a-zA-Z]/g, "").slice(0, 16),
+  };
 
   return (
-    <div className="min-h-screen bg-mnemo-background text-mnemo-text">
-      <Navbar />
-
-      <main className="max-w-5xl mx-auto px-6 py-10">
-        <div className="mb-10">
-          <h1 className="font-display text-3xl font-semibold mb-2">Dashboard</h1>
-          <p className="text-mnemo-muted">Overview of your knowledge and learning progress.</p>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          {stats.map((stat) => {
-            const Icon = stat.icon;
-            return (
-              <Card key={stat.label} className="border-mnemo-border bg-mnemo-surface shadow-none">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon className="w-4 h-4 text-mnemo-muted" />
-                    <span className="text-sm text-mnemo-muted">{stat.label}</span>
-                  </div>
-                  <div className="font-display text-2xl font-semibold">{stat.value}</div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-wrap gap-3 mb-10">
-          <Link href="/capture">
-            <Button className="bg-mnemo-primary hover:bg-mnemo-primary/90 text-white rounded-full px-5">
-              <Plus className="w-4 h-4 mr-2" />
-              Add memory
-            </Button>
-          </Link>
-          <Link href="/quiz">
-            <Button variant="outline" className="border-mnemo-border text-mnemo-text hover:bg-mnemo-surface rounded-full px-5">
-              <GraduationCap className="w-4 h-4 mr-2" />
-              Quiz
-            </Button>
-          </Link>
-          <Link href="/graph">
-            <Button variant="outline" className="border-mnemo-border text-mnemo-text hover:bg-mnemo-surface rounded-full px-5">
-              <Network className="w-4 h-4 mr-2" />
-              Graph
-            </Button>
-          </Link>
-          <Link href="/chat">
-            <Button variant="outline" className="border-mnemo-border text-mnemo-text hover:bg-mnemo-surface rounded-full px-5">
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Chat
-            </Button>
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-6">
-            <h2 className="font-display text-lg font-semibold">Recent memories</h2>
-            {memoriesWithConnections.length === 0 ? (
-              <Card className="border-mnemo-border bg-mnemo-surface shadow-none">
-                <CardContent className="p-10 text-center">
-                  <Brain className="w-10 h-10 text-mnemo-muted mx-auto mb-4" />
-                  <CardTitle className="font-display text-lg mb-1">No memories yet</CardTitle>
-                  <CardDescription className="text-mnemo-muted mb-4">
-                    Capture your first idea to start building your knowledge graph.
-                  </CardDescription>
-                  <Link href="/capture">
-                    <Button className="bg-mnemo-primary hover:bg-mnemo-primary/90 text-white rounded-full px-5">
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add memory
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            ) : (
-              memoriesWithConnections.slice(0, 6).map((memory) => (
-                <MemoryCard key={memory.id} memory={memory} connections={memory.connections} />
-              ))
-            )}
-          </div>
-
-          <div className="space-y-6">
-            <h2 className="font-display text-lg font-semibold">Recently connected</h2>
-            {recentConnections.length === 0 ? (
-              <Card className="border-mnemo-border bg-mnemo-surface shadow-none">
-                <CardContent className="p-6 text-center">
-                  <p className="text-sm text-mnemo-muted">No connections found yet.</p>
-                </CardContent>
-              </Card>
-            ) : (
-              recentConnections.map((connection) => (
-                <ConnectionCard key={connection.id} connection={connection} />
-              ))
-            )}
-          </div>
-        </div>
-      </main>
-    </div>
+    <AppShell userEmail={user.email}>
+      <DashboardView data={data} />
+    </AppShell>
   );
 }

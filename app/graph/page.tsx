@@ -1,65 +1,105 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
-import { Navbar } from "@/components/Navbar";
-import { KnowledgeGraph } from "@/components/KnowledgeGraph";
-import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
-import { Network } from "lucide-react";
+import { AppShell } from "@/components/app/AppShell";
+import { GraphExplorer, type GraphNode, type GraphLink } from "@/components/app/GraphExplorer";
+import { deriveTopic, colorForKey } from "@/lib/knowledge";
+
+export const dynamic = "force-dynamic";
+
+type Idea = { insight: string; question: string; answer: string };
 
 export default async function GraphPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/auth/login");
 
-  if (!user) {
-    redirect("/auth/login");
-  }
-
-  const [memoriesResult, connectionsResult] = await Promise.all([
-    supabase.from("memories").select("id, title").eq("user_id", user.id),
-    supabase.from("connections").select("memory_a_id, memory_b_id, similarity_score").eq("user_id", user.id),
+  const [memoriesRes, connectionsRes, quizRes] = await Promise.all([
+    supabase.from("memories").select("id, title, ideas").eq("user_id", user.id),
+    supabase
+      .from("connections")
+      .select("memory_a_id, memory_b_id, similarity_score, explanation")
+      .eq("user_id", user.id),
+    supabase
+      .from("quiz_cards")
+      .select("memory_id, easiness_factor")
+      .eq("user_id", user.id),
   ]);
 
-  const memories = memoriesResult.data || [];
-  const connections = connectionsResult.data || [];
+  const memories = (memoriesRes.data || []) as { id: string; title: string; ideas: Idea[] }[];
+  const connections = (connectionsRes.data || []) as {
+    memory_a_id: string;
+    memory_b_id: string;
+    similarity_score: number;
+    explanation: string;
+  }[];
+  const cards = (quizRes.data || []) as { memory_id: string; easiness_factor: number }[];
 
-  const nodes = memories.map((memory) => ({
-    id: memory.id,
-    title: memory.title,
-  }));
+  const titleById = new Map(memories.map((m) => [m.id, m.title]));
 
-  const links = connections.map((connection) => ({
-    source: connection.memory_a_id,
-    target: connection.memory_b_id,
-    similarity: connection.similarity_score,
+  const connCount = new Map<string, number>();
+  for (const c of connections) {
+    connCount.set(c.memory_a_id, (connCount.get(c.memory_a_id) || 0) + 1);
+    connCount.set(c.memory_b_id, (connCount.get(c.memory_b_id) || 0) + 1);
+  }
+
+  const cardStats = new Map<string, { sum: number; n: number }>();
+  for (const c of cards) {
+    const cur = cardStats.get(c.memory_id) || { sum: 0, n: 0 };
+    cur.sum += c.easiness_factor || 2.5;
+    cur.n += 1;
+    cardStats.set(c.memory_id, cur);
+  }
+  const efToPct = (ef: number) =>
+    Math.max(40, Math.min(98, Math.round(40 + ((ef - 1.3) / (2.7 - 1.3)) * 58)));
+
+  const relatedByMemory = new Map<
+    string,
+    { id: string; title: string; explanation: string; score: number }[]
+  >();
+  for (const c of connections) {
+    const push = (from: string, to: string) => {
+      const arr = relatedByMemory.get(from) || [];
+      arr.push({
+        id: to,
+        title: titleById.get(to) || "Untitled",
+        explanation: c.explanation,
+        score: c.similarity_score,
+      });
+      relatedByMemory.set(from, arr);
+    };
+    push(c.memory_a_id, c.memory_b_id);
+    push(c.memory_b_id, c.memory_a_id);
+  }
+
+  const nodes: GraphNode[] = memories.map((m) => {
+    const topic = deriveTopic(m.title);
+    const stat = cardStats.get(m.id);
+    const cc = connCount.get(m.id) || 0;
+    return {
+      id: m.id,
+      title: m.title,
+      topic,
+      color: colorForKey(topic),
+      val: 4 + Math.min(cc, 8),
+      ideas: Array.isArray(m.ideas) ? m.ideas.map((i) => i.insight) : [],
+      connectionCount: cc,
+      retentionPct: stat ? efToPct(stat.sum / stat.n) : null,
+      cardCount: stat?.n || 0,
+      related: relatedByMemory.get(m.id) || [],
+    };
+  });
+
+  const links: GraphLink[] = connections.map((c) => ({
+    source: c.memory_a_id,
+    target: c.memory_b_id,
+    similarity: c.similarity_score,
   }));
 
   return (
-    <div className="min-h-screen bg-mnemo-background text-mnemo-text">
-      <Navbar />
-
-      <main className="max-w-6xl mx-auto px-6 py-10">
-        <div className="mb-8">
-          <h1 className="font-display text-2xl font-semibold mb-1">Knowledge graph</h1>
-          <p className="text-mnemo-muted">Explore how your ideas connect to each other.</p>
-        </div>
-
-        {nodes.length === 0 ? (
-          <Card className="border-mnemo-border bg-mnemo-surface shadow-none">
-            <CardContent className="p-10 text-center">
-              <Network className="w-10 h-10 text-mnemo-muted mx-auto mb-4" />
-              <CardTitle className="font-display text-lg mb-1">No memories yet</CardTitle>
-              <CardDescription className="text-mnemo-muted">
-                Capture your first idea to see your knowledge graph come to life.
-              </CardDescription>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className="border-mnemo-border bg-mnemo-surface shadow-none overflow-hidden">
-            <CardContent className="p-0">
-              <KnowledgeGraph nodes={nodes} links={links} />
-            </CardContent>
-          </Card>
-        )}
-      </main>
-    </div>
+    <AppShell userEmail={user.email}>
+      <GraphExplorer nodes={nodes} links={links} />
+    </AppShell>
   );
 }
