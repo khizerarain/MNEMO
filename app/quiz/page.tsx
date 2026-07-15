@@ -7,20 +7,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { GraduationCap, Plus } from "lucide-react";
 
+/**
+ * Data shape expected by the QuizCard component.
+ * Supabase stores question/answer/repetitions/easiness_factor directly,
+ * so we map those columns into a friendlier client shape.
+ */
 interface QuizCardData {
   id: string;
-  idea: {
-    question: string;
-    answer: string;
-    insight: string;
-  };
+  question: string;
+  answer: string;
   memory: {
     id: string;
     title: string;
   };
+  repetitions: number;
+  easiness_factor: number;
   interval_days: number;
-  repetition_count: number;
-  ease_factor: number;
 }
 
 export default async function QuizPage() {
@@ -31,14 +33,17 @@ export default async function QuizPage() {
     redirect("/auth/login");
   }
 
+  // Fetch cards that are due today or earlier. We join with memories to get the title.
   const { data, error } = await supabase
     .from("quiz_cards")
     .select(`
       id,
-      idea,
+      question,
+      answer,
+      repetitions,
+      easiness_factor,
       interval_days,
-      repetition_count,
-      ease_factor,
+      next_review_at,
       memory:memory_id ( id, title )
     `)
     .eq("user_id", user.id)
@@ -51,7 +56,25 @@ export default async function QuizPage() {
     redirect("/dashboard");
   }
 
-  const cards = (data || []) as unknown as QuizCardData[];
+  const rows = (data || []) as unknown as Array<{
+    id: string;
+    question: string;
+    answer: string;
+    repetitions: number;
+    easiness_factor: number;
+    interval_days: number;
+    memory: { id: string; title: string };
+  }>;
+
+  const cards: QuizCardData[] = rows.map((row) => ({
+    id: row.id,
+    question: row.question,
+    answer: row.answer,
+    memory: row.memory,
+    repetitions: row.repetitions,
+    easiness_factor: row.easiness_factor,
+    interval_days: row.interval_days,
+  }));
 
   return (
     <div className="min-h-screen bg-mnemo-background text-mnemo-text">

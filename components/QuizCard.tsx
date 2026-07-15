@@ -9,23 +9,28 @@ import { CheckCircle, XCircle, RotateCcw, Eye } from "lucide-react";
 
 interface QuizCardData {
   id: string;
-  idea: {
-    question: string;
-    answer: string;
-    insight: string;
-  };
+  question: string;
+  answer: string;
   memory: {
     id: string;
     title: string;
   };
-  interval_days: number;
-  repetition_count: number;
-  ease_factor: number;
 }
 
 interface QuizCardProps {
   cards: QuizCardData[];
 }
+
+/**
+ * Map the four user-friendly difficulty buttons to SM-2 quality ratings.
+ * SM-2 expects 0-5, where 0 = complete blackout and 5 = perfect recall.
+ */
+const RATING_MAP: Record<string, number> = {
+  again: 0,
+  hard: 3,
+  good: 4,
+  easy: 5,
+};
 
 export function QuizCard({ cards }: QuizCardProps) {
   const router = useRouter();
@@ -33,22 +38,31 @@ export function QuizCard({ cards }: QuizCardProps) {
   const [revealed, setRevealed] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const currentCard = cards[currentIndex];
   const progress = ((currentIndex) / cards.length) * 100;
 
-  async function submitRating(rating: 0 | 1 | 2 | 3 | 4 | 5) {
+  /**
+   * Submit the user's self-assessment to the SM-2 API.
+   * The API expects a quality score (0-5), not the button label.
+   */
+  async function submitRating(ratingKey: keyof typeof RATING_MAP) {
     if (!currentCard) return;
     setLoading(true);
+    setError(null);
+
+    const quality = RATING_MAP[ratingKey];
 
     try {
       const response = await fetch("/api/quiz", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardId: currentCard.id, rating }),
+        body: JSON.stringify({ cardId: currentCard.id, quality }),
       });
 
-      if (!response.ok) throw new Error("Failed to update quiz progress");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to update quiz progress");
 
       if (currentIndex + 1 < cards.length) {
         setCurrentIndex((prev) => prev + 1);
@@ -58,6 +72,7 @@ export function QuizCard({ cards }: QuizCardProps) {
       }
     } catch (err) {
       console.error(err);
+      setError(err instanceof Error ? err.message : "An unexpected error occurred");
     } finally {
       setLoading(false);
     }
@@ -91,7 +106,7 @@ export function QuizCard({ cards }: QuizCardProps) {
             From {currentCard.memory.title}
           </CardDescription>
           <CardTitle className="font-display text-lg font-medium leading-snug">
-            {currentCard.idea.question}
+            {currentCard.question}
           </CardTitle>
         </CardHeader>
 
@@ -108,17 +123,20 @@ export function QuizCard({ cards }: QuizCardProps) {
           ) : (
             <div className="p-4 rounded-lg bg-mnemo-background border border-mnemo-border">
               <p className="text-sm font-medium text-mnemo-text mb-1">Answer:</p>
-              <p className="text-sm text-mnemo-muted">{currentCard.idea.answer}</p>
+              <p className="text-sm text-mnemo-muted">{currentCard.answer}</p>
             </div>
           )}
 
           {revealed && (
             <div className="space-y-2">
               <p className="text-xs text-mnemo-muted text-center">How well did you know this?</p>
+              {error && (
+                <p className="text-xs text-red-600 text-center">{error}</p>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <Button
                   disabled={loading}
-                  onClick={() => submitRating(0)}
+                  onClick={() => submitRating("again")}
                   variant="outline"
                   className="border-red-200 text-red-700 hover:bg-red-50 rounded-lg h-11"
                 >
@@ -127,7 +145,7 @@ export function QuizCard({ cards }: QuizCardProps) {
                 </Button>
                 <Button
                   disabled={loading}
-                  onClick={() => submitRating(3)}
+                  onClick={() => submitRating("hard")}
                   variant="outline"
                   className="border-mnemo-border text-mnemo-muted hover:bg-mnemo-background rounded-lg h-11"
                 >
@@ -135,7 +153,7 @@ export function QuizCard({ cards }: QuizCardProps) {
                 </Button>
                 <Button
                   disabled={loading}
-                  onClick={() => submitRating(4)}
+                  onClick={() => submitRating("good")}
                   variant="outline"
                   className="border-mnemo-border text-mnemo-text hover:bg-mnemo-background rounded-lg h-11"
                 >
@@ -143,7 +161,7 @@ export function QuizCard({ cards }: QuizCardProps) {
                 </Button>
                 <Button
                   disabled={loading}
-                  onClick={() => submitRating(5)}
+                  onClick={() => submitRating("easy")}
                   variant="outline"
                   className="border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-lg h-11"
                 >
