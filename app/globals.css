@@ -10,6 +10,140 @@
   }
 }
 
+/* ===== Mnemo Brand tokens (premium dark landing) ===== */
+:root {
+  --mnemo-bg: #050505;
+  --mnemo-bg-2: #0a0a0a;
+  --mnemo-card: #111111;
+  --mnemo-border: rgba(255, 255, 255, 0.08);
+  --mnemo-primary: #7c3aed;
+  --mnemo-accent: #06b6d4;
+  --mnemo-success: #22c55e;
+  --mnemo-text: #ffffff;
+  --mnemo-muted: #a1a1aa;
+}
+
+/* Scoped premium dark surface for the marketing site — independent of app theme.
+   Overrides the shared theme variables so every mnemo-* utility resolves to the
+   fixed premium brand palette inside the landing, without affecting the app. */
+.landing-root {
+  --background: #050505;
+  --card: #111111;
+  --border: rgba(255, 255, 255, 0.08);
+  --foreground: #ffffff;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --accent: #06b6d4;
+  --muted-foreground: #a1a1aa;
+
+  background-color: var(--mnemo-bg);
+  color: #ffffff;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.landing-root ::selection {
+  background: rgba(124, 58, 237, 0.35);
+  color: #ffffff;
+}
+
+@layer utilities {
+  .bg-grid-mnemo {
+    background-image: linear-gradient(
+        to right,
+        rgba(255, 255, 255, 0.045) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .bg-dot-mnemo {
+    background-image: radial-gradient(
+      rgba(255, 255, 255, 0.08) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+
+  .mask-radial-faded {
+    -webkit-mask-image: radial-gradient(
+      ellipse 60% 55% at 50% 40%,
+      #000 40%,
+      transparent 100%
+    );
+    mask-image: radial-gradient(
+      ellipse 60% 55% at 50% 40%,
+      #000 40%,
+      transparent 100%
+    );
+  }
+
+  .mask-b-faded {
+    -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  }
+
+  .text-gradient-mnemo {
+    background: linear-gradient(120deg, #ffffff 0%, #c4b5fd 45%, #67e8f9 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .text-gradient-muted {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(255, 255, 255, 0.55) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .glass-mnemo {
+    background: rgba(17, 17, 17, 0.6);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--mnemo-border);
+  }
+
+  .shadow-glow-primary {
+    box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.25),
+      0 12px 48px -12px rgba(124, 58, 237, 0.5);
+  }
+
+  .shadow-glow-accent {
+    box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.25),
+      0 12px 48px -12px rgba(6, 182, 212, 0.45);
+  }
+
+  .animate-shimmer-text {
+    background: linear-gradient(
+      110deg,
+      rgba(255, 255, 255, 0.4) 20%,
+      rgba(255, 255, 255, 1) 50%,
+      rgba(255, 255, 255, 0.4) 80%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-root *,
+  .landing-root *::before,
+  .landing-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-display);
